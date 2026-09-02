@@ -1,0 +1,192 @@
+// ==========================================================
+// Courier & Logistics Management Platform - Prisma Schema
+// ==========================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// -----------------------------
+// ENUMS
+// -----------------------------
+
+enum Role {
+  CUSTOMER
+  COURIER
+  ADMIN
+}
+
+enum AuthProvider {
+  CREDENTIALS
+  GOOGLE
+}
+
+enum ShipmentStatus {
+  PENDING
+  PICKUP_SCHEDULED
+  COURIER_ASSIGNED
+  PICKED_UP
+  AT_ORIGIN_HUB
+  IN_TRANSIT
+  AT_DESTINATION_HUB
+  OUT_FOR_DELIVERY
+  DELIVERED
+  FAILED_DELIVERY
+  RETURNED
+  CANCELLED
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+}
+
+enum PaymentMethod {
+  STRIPE
+  BKASH
+  SSLCOMMERZ
+}
+
+// -----------------------------
+// MODELS
+// -----------------------------
+
+model User {
+  id            String       @id @default(uuid())
+  name          String
+  email         String       @unique
+  password      String? // nullable for social-login-only accounts
+  phone         String?
+  role          Role         @default(CUSTOMER)
+  provider      AuthProvider @default(CREDENTIALS)
+  googleId      String?      @unique
+  isActive      Boolean      @default(true)
+  refreshToken  String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  deletedAt     DateTime?
+
+  // Relations
+  shipmentsCreated  Shipment[]  @relation("CustomerShipments")
+  shipmentsAssigned Shipment[]  @relation("CourierShipments")
+  payments          Payment[]
+  auditLogs         AuditLog[]
+  hubManaged        Hub[]       @relation("HubManager")
+
+  @@index([email])
+  @@index([role])
+  @@map("users")
+}
+
+model Hub {
+  id          String   @id @default(uuid())
+  name        String
+  city        String
+  address     String
+  managerId   String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+
+  manager           User?      @relation("HubManager", fields: [managerId], references: [id])
+  originShipments    Shipment[] @relation("OriginHub")
+  destinationShipments Shipment[] @relation("DestinationHub")
+
+  @@index([city])
+  @@map("hubs")
+}
+
+model Shipment {
+  id                String         @id @default(uuid())
+  trackingCode      String         @unique
+  customerId        String
+  courierId         String?
+  originHubId       String?
+  destinationHubId  String?
+
+  pickupAddress     String
+  deliveryAddress   String
+  receiverName      String
+  receiverPhone     String
+  packageWeightKg   Float
+  packageDesc       String?
+
+  status            ShipmentStatus @default(PENDING)
+  price             Float
+  isFragile         Boolean        @default(false)
+
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  deletedAt         DateTime?
+
+  customer          User           @relation("CustomerShipments", fields: [customerId], references: [id])
+  courier           User?          @relation("CourierShipments", fields: [courierId], references: [id])
+  originHub         Hub?           @relation("OriginHub", fields: [originHubId], references: [id])
+  destinationHub    Hub?           @relation("DestinationHub", fields: [destinationHubId], references: [id])
+
+  trackingEvents    TrackingEvent[]
+  payment           Payment?
+
+  @@index([customerId])
+  @@index([courierId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("shipments")
+}
+
+model TrackingEvent {
+  id          String   @id @default(uuid())
+  shipmentId  String
+  status      ShipmentStatus
+  note        String?
+  createdAt   DateTime @default(now())
+
+  shipment    Shipment @relation(fields: [shipmentId], references: [id])
+
+  @@index([shipmentId])
+  @@map("tracking_events")
+}
+
+model Payment {
+  id              String        @id @default(uuid())
+  shipmentId      String        @unique
+  userId          String
+  amount          Float
+  currency        String        @default("usd")
+  method          PaymentMethod @default(STRIPE)
+  status          PaymentStatus @default(PENDING)
+  providerRef     String?       // Stripe PaymentIntent id / bKash trxID / SSLCommerz val_id
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  shipment        Shipment      @relation(fields: [shipmentId], references: [id])
+  user            User          @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([status])
+  @@map("payments")
+}
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  userId      String?
+  action      String   // e.g. "SHIPMENT_STATUS_CHANGED", "ROLE_UPDATED"
+  entityType  String   // e.g. "Shipment", "User"
+  entityId    String?
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  user        User?    @relation(fields: [userId], references: [id])
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
