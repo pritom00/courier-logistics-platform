@@ -2,6 +2,8 @@ import express, { Express, Request, Response } from "express";
 import cors from "cors";
 import helmet from "helmet";
 import morgan from "morgan";
+import swaggerUi from "swagger-ui-express";
+import { openapiSpec } from "./config/swagger";
 import { env } from "./config/env";
 import { globalLimiter } from "./middleware/rateLimiter";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler";
@@ -17,7 +19,10 @@ import { stripeWebhook } from "./modules/payment/payment.controller";
 
 const app: Express = express();
 
-app.use(helmet());
+// contentSecurityPolicy disabled because Swagger UI (mounted below) relies on
+// inline scripts/styles that a default CSP blocks; all other helmet
+// protections (HSTS, X-Frame-Options, etc.) remain active.
+app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors({ origin: env.CORS_ORIGIN, credentials: true }));
 app.use(morgan(env.NODE_ENV === "development" ? "dev" : "combined"));
 app.use(globalLimiter);
@@ -28,6 +33,14 @@ app.post("/api/v1/payments/webhook", express.raw({ type: "application/json" }), 
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Interactive API documentation (Swagger UI), generated from the static
+// OpenAPI spec in src/config/swagger.ts. Publicly readable, no auth needed
+// to view the docs themselves - individual endpoints still require Bearer
+// tokens when called.
+app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(openapiSpec, {
+  customSiteTitle: "Courier & Logistics Platform API Docs",
+}));
 
 app.get("/", (req: Request, res: Response) => {
   sendSuccess(res, { name: "Courier & Logistics Management Platform API", version: "v1" }, "Service is healthy");
