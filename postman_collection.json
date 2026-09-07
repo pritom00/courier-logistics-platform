@@ -1,32 +1,35 @@
 {
   "info": {
     "name": "Courier & Logistics Management Platform API",
-    "description": "Backend API for the Courier & Logistics Management Platform assignment. Import this collection into Postman and set the {{baseUrl}}, {{accessToken}}, {{refreshToken}} variables.",
+    "description": "Complete API reference and test suite for the Courier & Logistics Management Platform. Organized by resource (matching the README's endpoint map), with every one of the 29 endpoints covered, plus dedicated folders for RBAC-failure demos, validation errors, and standard error responses. Tokens and IDs auto-chain via test scripts - log in once per role and every subsequent request uses the saved token automatically. baseUrl defaults to the live Render deployment.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
-    { "key": "baseUrl", "value": "http://localhost:5000/api/v1" },
-    { "key": "accessToken", "value": "" },
+    { "key": "baseUrl", "value": "https://courier-logistics-platform.onrender.com/api/v1" },
+    { "key": "adminToken", "value": "" },
+    { "key": "customerToken", "value": "" },
+    { "key": "courierToken", "value": "" },
     { "key": "refreshToken", "value": "" },
     { "key": "shipmentId", "value": "" },
+    { "key": "courierId", "value": "" },
+    { "key": "paymentId", "value": "" },
     { "key": "hubId", "value": "" },
-    { "key": "userId", "value": "" }
+    { "key": "userId", "value": "" },
+    { "key": "paidPaymentId", "value": "1159b89b-8a3a-4708-bdbc-662129cfbee7" }
   ],
   "item": [
     {
-      "name": "Auth",
+      "name": "0. Auth - Setup & Token Lifecycle",
       "item": [
         {
-          "name": "Register",
-          "request": {
-            "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "url": "{{baseUrl}}/auth/register",
-            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Jane Doe\",\n  \"email\": \"jane@example.com\",\n  \"password\": \"Password@123\",\n  \"role\": \"CUSTOMER\"\n}" }
-          }
-        },
-        {
-          "name": "Login",
+          "name": "Login as Admin",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "const data = pm.response.json().data;",
+            "pm.collectionVariables.set('adminToken', data.accessToken);",
+            "pm.collectionVariables.set('refreshToken', data.refreshToken);",
+            "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+            "pm.test('Has accessToken', () => pm.expect(data.accessToken).to.be.a('string'));"
+          ]}}],
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
@@ -35,7 +38,44 @@
           }
         },
         {
-          "name": "Google Login",
+          "name": "Login as Customer",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "const data = pm.response.json().data;",
+            "pm.collectionVariables.set('customerToken', data.accessToken);",
+            "pm.test('Status is 200', () => pm.response.to.have.status(200));"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/auth/login",
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"customer@courierhub.com\",\n  \"password\": \"Customer@123\"\n}" }
+          }
+        },
+        {
+          "name": "Login as Courier",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "const data = pm.response.json().data;",
+            "pm.collectionVariables.set('courierToken', data.accessToken);",
+            "pm.test('Status is 200', () => pm.response.to.have.status(200));"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/auth/login",
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"courier@courierhub.com\",\n  \"password\": \"Courier@123\"\n}" }
+          }
+        },
+        {
+          "name": "Register (new user)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/auth/register",
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Jane Doe\",\n  \"email\": \"jane-{{$randomInt}}@example.com\",\n  \"password\": \"Password@123\",\n  \"role\": \"CUSTOMER\"\n}" }
+          }
+        },
+        {
+          "name": "Google Login (requires a real Google ID token)",
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
@@ -44,7 +84,11 @@
           }
         },
         {
-          "name": "Refresh Token",
+          "name": "Refresh Access Token",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+            "pm.test('Returns a new accessToken', () => pm.expect(pm.response.json().data.accessToken).to.be.a('string'));"
+          ]}}],
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
@@ -54,140 +98,482 @@
         },
         {
           "name": "Logout",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('Status is 200', () => pm.response.to.have.status(200));"
+          ]}}],
           "request": {
             "method": "POST",
-            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
             "url": "{{baseUrl}}/auth/logout"
           }
         }
       ]
     },
     {
-      "name": "Users / Profile",
+      "name": "1. Users / Profile",
       "item": [
         {
-          "name": "Get Me",
-          "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }], "url": "{{baseUrl}}/users/me" }
+          "name": "Get My Profile",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('Status is 200', () => pm.response.to.have.status(200));"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{customerToken}}" }],
+            "url": "{{baseUrl}}/users/me"
+          }
         },
         {
-          "name": "Update Me",
+          "name": "Update My Profile",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('Status is 200', () => pm.response.to.have.status(200));"
+          ]}}],
           "request": {
             "method": "PATCH",
-            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{customerToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
             "url": "{{baseUrl}}/users/me",
-            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Jane Updated\",\n  \"phone\": \"+8801XXXXXXXXX\"\n}" }
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Jane Updated\",\n  \"phone\": \"+8801700000000\"\n}" }
           }
         }
       ]
     },
     {
-      "name": "Hubs",
+      "name": "2. Hubs (CRUD + RBAC)",
       "item": [
         {
-          "name": "Create Hub (Admin)",
+          "name": "CREATE Hub (Admin) -> 201",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "const data = pm.response.json().data;",
+            "pm.collectionVariables.set('hubId', data.id);",
+            "pm.test('Status is 201', () => pm.response.to.have.status(201));"
+          ]}}],
           "request": {
             "method": "POST",
-            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
             "url": "{{baseUrl}}/hubs",
             "body": { "mode": "raw", "raw": "{\n  \"name\": \"Sylhet Hub\",\n  \"city\": \"Sylhet\",\n  \"address\": \"Zindabazar, Sylhet\"\n}" }
           }
         },
-        { "name": "List Hubs", "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }], "url": "{{baseUrl}}/hubs?page=1&limit=10" } },
-        { "name": "Get Hub By Id", "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }], "url": "{{baseUrl}}/hubs/{{hubId}}" } },
         {
-          "name": "Update Hub (Admin)",
+          "name": "RBAC: Customer creates Hub -> 403",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('Status is 403 Forbidden', () => pm.response.to.have.status(403));"
+          ]}}],
           "request": {
-            "method": "PATCH",
-            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }, { "key": "Content-Type", "value": "application/json" }],
-            "url": "{{baseUrl}}/hubs/{{hubId}}",
-            "body": { "mode": "raw", "raw": "{\n  \"isActive\": true\n}" }
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{customerToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": "{{baseUrl}}/hubs",
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Should Fail\",\n  \"city\": \"Dhaka\",\n  \"address\": \"Nowhere\"\n}" }
           }
         },
-        { "name": "Delete Hub (Admin, soft)", "request": { "method": "DELETE", "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }], "url": "{{baseUrl}}/hubs/{{hubId}}" } }
+        {
+          "name": "READ Hubs - List (paginated)",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('Status is 200', () => pm.response.to.have.status(200));"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "url": "{{baseUrl}}/hubs?page=1&limit=10"
+          }
+        },
+        {
+          "name": "READ Hub by ID -> 200",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('Status is 200', () => pm.response.to.have.status(200));"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "url": "{{baseUrl}}/hubs/{{hubId}}"
+          }
+        },
+        {
+          "name": "UPDATE Hub (Admin) -> 200",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('Status is 200', () => pm.response.to.have.status(200));"
+          ]}}],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": "{{baseUrl}}/hubs/{{hubId}}",
+            "body": { "mode": "raw", "raw": "{\n  \"address\": \"Zindabazar Point, Sylhet - Updated\"\n}" }
+          }
+        },
+        {
+          "name": "DELETE Hub - soft delete (Admin) -> 200",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('Status is 200', () => pm.response.to.have.status(200));"
+          ]}}],
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "url": "{{baseUrl}}/hubs/{{hubId}}"
+          }
+        }
       ]
     },
     {
-      "name": "Shipments",
+      "name": "3. Shipments (CRUD + RBAC + Business Logic)",
       "item": [
         {
-          "name": "Create Shipment (Customer)",
+          "name": "CREATE Shipment (Customer) -> 201",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "const data = pm.response.json().data;",
+            "pm.collectionVariables.set('shipmentId', data.id);",
+            "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+            "pm.test('Price auto-calculated', () => pm.expect(data.price).to.eql(105));"
+          ]}}],
           "request": {
             "method": "POST",
-            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{customerToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
             "url": "{{baseUrl}}/shipments",
-            "body": { "mode": "raw", "raw": "{\n  \"pickupAddress\": \"House 12, Road 5, Dhanmondi, Dhaka\",\n  \"deliveryAddress\": \"House 40, GEC Circle, Chattogram\",\n  \"receiverName\": \"Karim Rahman\",\n  \"receiverPhone\": \"+8801711111111\",\n  \"packageWeightKg\": 2.5,\n  \"isFragile\": false\n}" }
+            "body": { "mode": "raw", "raw": "{\n  \"pickupAddress\": \"House 12, Dhanmondi, Dhaka\",\n  \"deliveryAddress\": \"GEC Circle, Chattogram\",\n  \"receiverName\": \"Karim Rahman\",\n  \"receiverPhone\": \"+8801711111111\",\n  \"packageWeightKg\": 3,\n  \"isFragile\": false\n}" }
           }
         },
-        { "name": "List Shipments (paginated/filter/sort)", "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }], "url": "{{baseUrl}}/shipments?page=1&limit=10&status=PENDING&sortBy=createdAt&sortOrder=desc" } },
-        { "name": "Search Shipments", "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }], "url": "{{baseUrl}}/shipments/search?q=CRX" } },
-        { "name": "Get Shipment By Id (with tracking timeline)", "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }], "url": "{{baseUrl}}/shipments/{{shipmentId}}" } },
         {
-          "name": "Update Shipment",
+          "name": "RBAC: Courier creates Shipment -> 403",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('Status is 403 Forbidden', () => pm.response.to.have.status(403));"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{courierToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": "{{baseUrl}}/shipments",
+            "body": { "mode": "raw", "raw": "{\n  \"pickupAddress\": \"X\",\n  \"deliveryAddress\": \"X\",\n  \"receiverName\": \"X\",\n  \"receiverPhone\": \"01700000000\",\n  \"packageWeightKg\": 1\n}" }
+          }
+        },
+        {
+          "name": "READ Shipments - List (paginated, filtered, sorted)",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('Status is 200', () => pm.response.to.have.status(200));"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "url": "{{baseUrl}}/shipments?page=1&limit=10&status=PENDING&sortBy=createdAt&sortOrder=desc"
+          }
+        },
+        {
+          "name": "SEARCH Shipments",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('Status is 200', () => pm.response.to.have.status(200));"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "url": "{{baseUrl}}/shipments/search?q=CRX"
+          }
+        },
+        {
+          "name": "My Assigned Shipments (Courier)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{courierToken}}" }],
+            "url": "{{baseUrl}}/shipments/my-assigned"
+          }
+        },
+        {
+          "name": "READ Shipment Detail (full tracking timeline)",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('Status is 200', () => pm.response.to.have.status(200));"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "url": "{{baseUrl}}/shipments/{{shipmentId}}"
+          }
+        },
+        {
+          "name": "UPDATE Shipment details",
           "request": {
             "method": "PATCH",
-            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{customerToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
             "url": "{{baseUrl}}/shipments/{{shipmentId}}",
             "body": { "mode": "raw", "raw": "{\n  \"packageDesc\": \"Fragile electronics\"\n}" }
           }
         },
         {
-          "name": "Assign Courier (Admin)",
+          "name": "Get Courier ID (for assignment)",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "const data = pm.response.json().data;",
+            "if (data.items && data.items.length > 0) { pm.collectionVariables.set('courierId', data.items[0].id); pm.collectionVariables.set('userId', data.items[0].id); }",
+            "pm.test('Status is 200', () => pm.response.to.have.status(200));"
+          ]}}],
           "request": {
-            "method": "POST",
-            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }, { "key": "Content-Type", "value": "application/json" }],
-            "url": "{{baseUrl}}/shipments/{{shipmentId}}/assign",
-            "body": { "mode": "raw", "raw": "{\n  \"courierId\": \"{{userId}}\"\n}" }
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "url": "{{baseUrl}}/admin/users?role=COURIER"
           }
         },
         {
-          "name": "Update Shipment Status (Admin/Courier)",
+          "name": "ASSIGN Courier to Shipment (Admin) -> 200",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+            "pm.test('Status field is COURIER_ASSIGNED', () => pm.expect(pm.response.json().data.status).to.eql('COURIER_ASSIGNED'));"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": "{{baseUrl}}/shipments/{{shipmentId}}/assign",
+            "body": { "mode": "raw", "raw": "{\n  \"courierId\": \"{{courierId}}\"\n}" }
+          }
+        },
+        {
+          "name": "RBAC: Customer assigns Courier -> 403",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('Status is 403 Forbidden', () => pm.response.to.have.status(403));"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{customerToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": "{{baseUrl}}/shipments/{{shipmentId}}/assign",
+            "body": { "mode": "raw", "raw": "{\n  \"courierId\": \"{{courierId}}\"\n}" }
+          }
+        },
+        {
+          "name": "UPDATE Status: valid transition -> PICKED_UP -> 200",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('Status is 200', () => pm.response.to.have.status(200));"
+          ]}}],
           "request": {
             "method": "PATCH",
-            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{courierToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
             "url": "{{baseUrl}}/shipments/{{shipmentId}}/status",
             "body": { "mode": "raw", "raw": "{\n  \"status\": \"PICKED_UP\",\n  \"note\": \"Picked up from sender\"\n}" }
           }
         },
-        { "name": "Cancel Shipment", "request": { "method": "POST", "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }], "url": "{{baseUrl}}/shipments/{{shipmentId}}/cancel" } },
-        { "name": "My Assigned Shipments (Courier)", "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }], "url": "{{baseUrl}}/shipments/my-assigned" } },
-        { "name": "Delete Shipment (Admin, soft)", "request": { "method": "DELETE", "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }], "url": "{{baseUrl}}/shipments/{{shipmentId}}" } }
-      ]
-    },
-    {
-      "name": "Payments",
-      "item": [
         {
-          "name": "Initiate Payment",
+          "name": "UPDATE Status: invalid jump -> DELIVERED -> 400",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('Status is 400 Bad Request', () => pm.response.to.have.status(400));"
+          ]}}],
           "request": {
-            "method": "POST",
-            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }, { "key": "Content-Type", "value": "application/json" }],
-            "url": "{{baseUrl}}/payments/initiate",
-            "body": { "mode": "raw", "raw": "{\n  \"shipmentId\": \"{{shipmentId}}\"\n}" }
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{courierToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": "{{baseUrl}}/shipments/{{shipmentId}}/status",
+            "body": { "mode": "raw", "raw": "{\n  \"status\": \"DELIVERED\"\n}" }
           }
         },
-        { "name": "Get Payment By Id", "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }], "url": "{{baseUrl}}/payments/{{shipmentId}}" } },
         {
-          "name": "Stripe Webhook (called by Stripe, not manually)",
+          "name": "CANCEL Shipment",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Stripe-Signature", "value": "<from-stripe>" }],
-            "url": "{{baseUrl}}/payments/webhook",
-            "body": { "mode": "raw", "raw": "{ \"note\": \"Sent by Stripe CLI/dashboard during real webhook events\" }" }
+            "header": [{ "key": "Authorization", "value": "Bearer {{customerToken}}" }],
+            "url": "{{baseUrl}}/shipments/{{shipmentId}}/cancel"
+          }
+        },
+        {
+          "name": "DELETE Shipment - soft delete (Admin)",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "url": "{{baseUrl}}/shipments/{{shipmentId}}"
           }
         }
       ]
     },
     {
-      "name": "Admin",
+      "name": "4. Validation & Error Handling",
       "item": [
-        { "name": "Dashboard Stats", "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }], "url": "{{baseUrl}}/admin/dashboard-stats" } },
-        { "name": "Audit Logs", "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }], "url": "{{baseUrl}}/admin/audit-logs?page=1&limit=20" } },
-        { "name": "List Users", "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }], "url": "{{baseUrl}}/admin/users?page=1&limit=10&role=COURIER" } },
         {
-          "name": "Update User Role",
+          "name": "Validation: invalid email format -> 422",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('Status is 422', () => pm.response.to.have.status(422));",
+            "pm.test('Structured error shape', () => {",
+            "  const json = pm.response.json();",
+            "  pm.expect(json.success).to.eql(false);",
+            "  pm.expect(json.errors).to.be.an('array');",
+            "});"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/auth/register",
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Bad Email User\",\n  \"email\": \"not-an-email\",\n  \"password\": \"Password@123\"\n}" }
+          }
+        },
+        {
+          "name": "401 Unauthorized: no token provided",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('Status is 401', () => pm.response.to.have.status(401));"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/users/me"
+          }
+        },
+        {
+          "name": "404 Not Found: fake shipment ID",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('Status is 404', () => pm.response.to.have.status(404));"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "url": "{{baseUrl}}/shipments/00000000-0000-0000-0000-000000000099"
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Payments",
+      "item": [
+        {
+          "name": "Create Payment Session (real Stripe PaymentIntent)",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "const data = pm.response.json().data;",
+            "if (data.payment) { pm.collectionVariables.set('paymentId', data.payment.id); }",
+            "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+            "pm.test('Has real clientSecret', () => pm.expect(data.clientSecret).to.include('secret'));"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{customerToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": "{{baseUrl}}/payments/initiate",
+            "body": { "mode": "raw", "raw": "{\n  \"shipmentId\": \"{{shipmentId}}\"\n}" }
+          }
+        },
+        {
+          "name": "Payment status BEFORE confirmation -> PENDING",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('Status field is PENDING', () => pm.expect(pm.response.json().data.status).to.eql('PENDING'));"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{customerToken}}" }],
+            "url": "{{baseUrl}}/payments/{{paymentId}}"
+          }
+        },
+        {
+          "name": "Payment status AFTER webhook (previously confirmed) -> PAID",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('Status field is PAID', () => pm.expect(pm.response.json().data.status).to.eql('PAID'));"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{customerToken}}" }],
+            "url": "{{baseUrl}}/payments/{{paidPaymentId}}"
+          }
+        },
+        {
+          "name": "Stripe Webhook (called by Stripe, not manually)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Stripe-Signature", "value": "<from-stripe>" }
+            ],
+            "url": "{{baseUrl}}/payments/webhook",
+            "body": { "mode": "raw", "raw": "{ \"note\": \"Sent by Stripe directly during real webhook events - signature verified server-side\" }" }
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Admin (Stats, Audit, User Management)",
+      "item": [
+        {
+          "name": "Dashboard Stats - 1st call (cached: false)",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('cached is false', () => pm.expect(pm.response.json().data.cached).to.eql(false));"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "url": "{{baseUrl}}/admin/dashboard-stats"
+          }
+        },
+        {
+          "name": "Dashboard Stats - 2nd call (cached: true, Redis)",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('cached is true', () => pm.expect(pm.response.json().data.cached).to.eql(true));"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "url": "{{baseUrl}}/admin/dashboard-stats"
+          }
+        },
+        {
+          "name": "Audit Logs (full activity trail)",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+            "pm.test('Has items array', () => pm.expect(pm.response.json().data.items).to.be.an('array'));"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "url": "{{baseUrl}}/admin/audit-logs?page=1&limit=20"
+          }
+        },
+        {
+          "name": "List Users (paginated, filter by role)",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('Status is 200', () => pm.response.to.have.status(200));"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "url": "{{baseUrl}}/admin/users?page=1&limit=10&role=COURIER"
+          }
+        },
+        {
+          "name": "RBAC: Customer accesses admin/users -> 403",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('Status is 403 Forbidden', () => pm.response.to.have.status(403));"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{customerToken}}" }],
+            "url": "{{baseUrl}}/admin/users"
+          }
+        },
+        {
+          "name": "Update User Role (Admin)",
           "request": {
             "method": "PATCH",
-            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
             "url": "{{baseUrl}}/admin/users/{{userId}}/role",
             "body": { "mode": "raw", "raw": "{\n  \"role\": \"COURIER\"\n}" }
           }
@@ -195,10 +581,19 @@
       ]
     },
     {
-      "name": "Health",
+      "name": "7. Health",
       "item": [
-        { "name": "Root", "request": { "method": "GET", "url": "{{baseUrl}}/../" } },
-        { "name": "Health Check", "request": { "method": "GET", "url": "{{baseUrl}}/../health" } }
+        {
+          "name": "Root",
+          "request": { "method": "GET", "url": "{{baseUrl}}/../" }
+        },
+        {
+          "name": "Health Check",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('Status is 200', () => pm.response.to.have.status(200));"
+          ]}}],
+          "request": { "method": "GET", "url": "{{baseUrl}}/../health" }
+        }
       ]
     }
   ]

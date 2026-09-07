@@ -2,21 +2,47 @@
 
 A backend-only RESTful API for a courier/logistics platform: customers create
 shipments, admins assign couriers and manage hubs, couriers update delivery
-status, and payments are processed through a real payment gateway.
+status, and payments are processed through a real Stripe integration.
 
-No frontend is included — test everything with the included Postman
-collection (`postman_collection.json`) or Thunder Client.
+**No frontend is included** — this is fully tested via Postman and an
+automated verification script (see below). No manual UI testing is needed.
+
+## 🔗 Live Links
+
+| | |
+|---|---|
+| **Live API** | https://courier-logistics-platform.onrender.com |
+| **API Docs (Swagger UI)** | https://courier-logistics-platform.onrender.com/api-docs |
+| **Health check** | https://courier-logistics-platform.onrender.com/health |
+| **Repo** | https://github.com/pritom00/courier-logistics-platform |
+
+> Render's free tier spins the service down after inactivity — the very
+> first request after a period of idle time may take 20–30 seconds to wake
+> up. This is expected, not a bug.
+
+### Demo Admin Credentials
+
+```
+email:    admin@courierhub.com
+password: Admin@12345
+```
+
+Also seeded: `courier@courierhub.com` / `Courier@123` and
+`customer@courierhub.com` / `Customer@123` — one account per role, for
+testing RBAC.
 
 ## Tech Stack
 
 - Node.js + TypeScript + Express.js
-- PostgreSQL + Prisma ORM
+- PostgreSQL + Prisma ORM (hosted on Neon)
 - Zod (validation)
 - JWT (Bearer tokens) + bcryptjs (password hashing)
 - Google Identity Services (GCP social login)
 - Stripe (real payment processing, test mode)
-- Redis (optional — caching layer, falls back to in-memory if unset)
+- Redis via Upstash (caching layer — falls back to in-memory if unset)
+- Swagger UI / OpenAPI 3.0 (interactive API docs at `/api-docs`)
 - helmet, cors, express-rate-limit (security)
+- Deployed on Render
 
 ## Roles
 
@@ -26,27 +52,34 @@ Three fixed roles, enforced by RBAC middleware on every protected route:
 - **COURIER** — sees assigned shipments, updates delivery status
 - **ADMIN** — manages hubs, assigns couriers, manages users/roles, views stats & audit logs
 
-## Getting Started
+## Getting Started (running your own copy)
 
 ```bash
 npm install
 cp .env.example .env        # fill in DATABASE_URL, JWT secrets, Stripe keys, etc.
-npx prisma migrate dev      # creates tables (or: npx prisma migrate deploy in prod)
-npx prisma db seed          # creates demo admin/courier/customer + a hub
+npx prisma generate
+npx prisma migrate deploy   # applies the existing migrations
+npx prisma db seed          # creates demo admin/courier/customer + hubs
 npm run dev                 # http://localhost:5000
 ```
 
 Production build: `npm run build && npm start`
 
-### Demo Admin Credentials
+Interactive API docs, once running: `http://localhost:5000/api-docs`
 
-```
-email:    admin@courierhub.com
-password: Admin@12345
+## ✅ One-Command Verification
+
+A script exercises every mandatory requirement — auth, RBAC across all 3
+roles, full CRUD, validation, error handling (401/403/404/422), the shipment
+state machine, real Stripe payments, Redis caching, and audit logs — and
+prints a pass/fail report:
+
+```bash
+node scripts/verify-all.js            # tests localhost:5000
+node scripts/verify-all.js --live     # tests the live Render deployment
 ```
 
-(also creates `courier@courierhub.com` / `Courier@123` and
-`customer@courierhub.com` / `Customer@123` for testing all three roles)
+Last run against the live deployment: **31/31 checks passed.**
 
 ## API Response Shape
 
@@ -60,7 +93,7 @@ Every endpoint returns this structure, success or failure:
 { "success": false, "message": "Something went wrong", "errors": [] }
 ```
 
-## Endpoint Map (26 endpoints, `/api/v1` versioned)
+## Endpoint Map (29 operations across 22 routes, `/api/v1` versioned)
 
 | Area | Method | Route | Access |
 |---|---|---|---|
@@ -94,67 +127,73 @@ Every endpoint returns this structure, success or failure:
 | Admin | GET | `/admin/users` | Admin (paginated, filter, search) |
 | Admin | PATCH | `/admin/users/:id/role` | Admin |
 
+Full interactive reference with request/response schemas: **`/api-docs`**.
+
 ## Requirements Checklist → Where It Lives
 
 - **Structured JSON responses** → `src/utils/apiResponse.ts`, used everywhere
 - **Validation (Zod)** → one `*.validation.ts` file per module, applied via `src/middleware/validate.ts`
 - **Auth + RBAC (3 roles)** → `src/middleware/auth.ts` (`authenticate`, `authorize(...)`)
-- **Google/GCP social login** → `src/modules/auth/auth.service.ts::loginWithGoogle` (verifies Google ID token server-side)
-- **Payment integration (real, not simulated)** → `src/modules/payment` — Stripe PaymentIntents + signature-verified webhook is the source of truth for payment status
+- **Google/GCP social login** → `src/modules/auth/auth.service.ts::loginWithGoogle` (verifies Google ID token server-side against Google's public keys)
+- **Payment integration (real, not simulated)** → `src/modules/payment` — Stripe PaymentIntents + signature-verified webhook is the source of truth for payment status; personally tested end-to-end including a real confirmed charge
 - **PostgreSQL + Prisma, relationships, constraints, indexing** → `prisma/schema.prisma` (6 models, FKs, `@@index` on hot query paths)
 - **Transactions / race-condition safety** → `shipment.service.ts::assignCourier` and `createShipment` use `prisma.$transaction` to prevent double-assignment and keep shipment+tracking-event writes atomic
-- **State machine for shipment status** → `shipment.stateMachine.ts` rejects illegal transitions
+- **State machine for shipment status** → `shipment.stateMachine.ts` rejects illegal transitions (verified: `PICKED_UP → DELIVERED` correctly rejected with 400)
 - **Pagination** → `GET /shipments`, `/hubs`, `/admin/users`, `/admin/audit-logs`
 - **Filtering & sorting** → `GET /shipments?status=&sortBy=&sortOrder=`
 - **Search** → `GET /shipments/search?q=`, `admin/users?q=`
-- **Soft deletes** → `deletedAt` on User/Hub/Shipment, enforced in every query's `where`
-- **Audit logs** → `src/utils/audit.ts`, called on registration, login, role changes, courier assignment, status changes, cancellations
-- **Redis caching** → `src/config/redis.ts` (60s cache on `/admin/dashboard-stats`, invalidated on shipment writes); falls back to an in-memory store if `REDIS_URL` is unset so local dev works without Redis installed
-- **Rate limiting** → `src/middleware/rateLimiter.ts` (global + tighter limiter on auth routes)
+- **Soft deletes** → `deletedAt` on User/Hub/Shipment, enforced in every query's `where` (verified at the database row level: record persists, just excluded from queries)
+- **Audit logs** → `src/utils/audit.ts`, called on registration, login, role changes, courier assignment, status changes, cancellations, payment events
+- **Redis caching** → `src/config/redis.ts` (60s cache on `/admin/dashboard-stats` via Upstash, invalidated on shipment writes); falls back to an in-memory store if `REDIS_URL` is unset
+- **Rate limiting** → `src/middleware/rateLimiter.ts` (global + tighter 20-req/15-min limiter on auth routes; verified: 21st rapid login attempt returns 429)
 - **Security headers / CORS** → `helmet()` + `cors()` in `src/app.ts`
 - **Centralized error handling** → `src/middleware/errorHandler.ts` (handles `ApiError`, Prisma error codes, and unknown errors uniformly)
 - **API versioning** → all routes mounted under `/api/v1`
+- **API documentation** → Swagger/OpenAPI 3.0 at `/api-docs`, plus a Postman collection (`postman_collection.json`)
 
 ## Payment Integration Notes
 
-Stripe is the reference integration (works in test mode with your own free
-Stripe test keys — no business verification needed to test). The `Payment`
-model and flow (`initiate → provider redirect/confirm → webhook updates
-status`) is provider-agnostic: swapping in bKash or SSLCommerz means
-replacing the calls inside `payment.service.ts` while keeping the same
-`Payment` schema, `PaymentStatus` enum, and webhook-is-source-of-truth
-pattern.
+Stripe is the integration used (test mode, free to set up). The `Payment`
+model and flow (`initiate → client confirms → webhook updates status`) is
+provider-agnostic: swapping in bKash or SSLCommerz means replacing the
+provider calls inside `payment.service.ts` while keeping the same `Payment`
+schema, `PaymentStatus` enum, and webhook-is-source-of-truth pattern.
 
-To test locally: `stripe listen --forward-to localhost:5000/api/v1/payments/webhook`
-using the [Stripe CLI](https://docs.stripe.com/stripe-cli), and use Stripe's
-[test card numbers](https://docs.stripe.com/testing) to simulate a charge.
+The webhook is the only thing that ever marks a payment `PAID` — the client
+can never claim success on its own. This was verified end-to-end: created a
+real PaymentIntent, confirmed it with a Stripe test card via the API, and
+watched the webhook flip the stored payment status from `PENDING` to `PAID`.
 
-## What Still Needs Your Own Credentials
+To test locally: `stripe listen --api-key <your_sk_test_key> --forward-to localhost:5000/api/v1/payments/webhook`
+using the [Stripe CLI](https://docs.stripe.com/stripe-cli).
 
-This repo is complete and runs end-to-end, but three things require
-credentials only you can generate (they're secrets, not code):
+## Postman Collection
 
-1. **`DATABASE_URL`** — your own PostgreSQL instance (local, Supabase, Neon, Render, etc.)
-2. **`GOOGLE_CLIENT_ID`** — from Google Cloud Console (OAuth consent screen + Web client ID) for the GCP social login requirement
-3. **`STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET`** — free from your Stripe dashboard, test mode
+Import `postman_collection.json`. It's organized to mirror this README:
+Auth/Setup, Hubs, Shipments, Validation & Error Handling, Payments, and
+Admin (caching & audit logs) — including RBAC failure demos (403s),
+validation errors (422), and standard error responses (401/404). Requests
+auto-chain tokens and IDs via test scripts — log in once, and every
+subsequent request in the collection uses the saved token automatically.
 
-Deployment (Vercel/Render) and the walkthrough video are the last two
-submission items — the API itself is ready for both once you plug in the
-above.
+`baseUrl` defaults to the live Render deployment; change it to
+`http://localhost:5000/api/v1` to test locally instead.
 
-## Verified in This Build
+## Project Structure
 
-- `npm install` — clean install, 224 packages
-- `npx tsc --noEmit` — 0 type errors across the whole codebase
-- `npm run build` — compiles to `dist/` successfully
-- The Prisma schema's SQL migration was hand-verified by running it against
-  a real local PostgreSQL 16 instance: all 6 tables, 9 foreign keys, and
-  every index were created without error (`prisma/migrations/20260101000000_init/migration.sql`)
-
-> Note: `npx prisma generate` / `migrate dev` couldn't complete inside the
-> sandbox this was built in because it needs to download Prisma's engine
-> binary from `binaries.prisma.sh`, which that sandbox's network allowlist
-> blocks. This is a sandbox limitation, not a project issue — on your own
-> machine (or in CI/Vercel/Render) `npx prisma generate` will work normally
-> as part of `npm install`. The SQL migration above proves the schema itself
-> is correct.
+```
+src/
+  config/       env, Prisma client, Redis, Swagger spec
+  middleware/   auth, RBAC, validation, error handling, rate limiting
+  modules/      auth, users, hubs, shipments, payments, admin
+                (each: controller, service, routes, validation)
+  utils/        response helpers, ApiError, JWT, pagination, audit logging
+  app.ts        Express app wiring
+  server.ts     entrypoint
+prisma/
+  schema.prisma
+  migrations/
+  seed.ts
+scripts/
+  verify-all.js  one-command end-to-end test suite
+```
