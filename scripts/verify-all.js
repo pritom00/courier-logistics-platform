@@ -205,6 +205,41 @@ async function main() {
     console.log("\nRate limiting: skipped in --live mode to avoid locking yourself out of prod login");
   }
 
+  // ---------- API Documentation (Swagger) ----------
+  console.log("\nAPI Documentation (Swagger /api-docs)");
+  const ROOT = BASE.replace("/api/v1", "");
+  try {
+    const pageRes = await fetch(`${ROOT}/api-docs/`);
+    const pageHtml = await pageRes.text();
+    check("Docs page returns 200", pageRes.status === 200);
+    check("Docs page renders Swagger UI", pageHtml.includes("Swagger UI") || pageHtml.includes("swagger-ui"));
+
+    const initRes = await fetch(`${ROOT}/api-docs/swagger-ui-init.js`);
+    const initJs = await initRes.text();
+    const match = initJs.match(/"swaggerDoc":\s*(\{[\s\S]*?\}),\s*"customOptions"/) || initJs.match(/"swaggerDoc":\s*(\{[\s\S]*\})\s*\}\s*;?\s*$/);
+    let spec = null;
+    try {
+      if (match) spec = JSON.parse(match[1]);
+    } catch {
+      /* leave spec null, checked below */
+    }
+    check("Embedded OpenAPI spec is valid JSON", !!spec);
+
+    if (spec) {
+      const pathCount = Object.keys(spec.paths || {}).length;
+      let opCount = 0;
+      Object.values(spec.paths || {}).forEach((methods) => (opCount += Object.keys(methods).length));
+      check("Spec has 20+ unique paths", pathCount >= 20, `found ${pathCount}`);
+      check("Spec has 25+ total operations", opCount >= 25, `found ${opCount}`);
+
+      const tagNames = (spec.tags || []).map((t) => t.name);
+      check("All 6 tag groups present", ["Auth", "Users", "Hubs", "Shipments", "Payments", "Admin"].every((t) => tagNames.includes(t)));
+      check("Bearer auth scheme defined", !!spec.components?.securitySchemes?.bearerAuth);
+    }
+  } catch (err) {
+    check("Docs endpoint reachable", false, err.message);
+  }
+
   // ---------- Summary ----------
   console.log("\n" + "=".repeat(50));
   console.log(`RESULTS: ${pass} passed, ${fail} failed`);
