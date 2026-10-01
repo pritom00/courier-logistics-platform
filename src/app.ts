@@ -19,6 +19,11 @@ import { stripeWebhook } from "./modules/payment/payment.controller";
 
 const app: Express = express();
 
+// Render (and most PaaS) sit behind a reverse proxy; without this, every
+// request appears to originate from the same internal IP, which breaks
+// IP-based rate limiting (it would count all visitors as one).
+app.set("trust proxy", 1);
+
 // contentSecurityPolicy disabled because Swagger UI (mounted below) relies on
 // inline scripts/styles that a default CSP blocks; all other helmet
 // protections (HSTS, X-Frame-Options, etc.) remain active.
