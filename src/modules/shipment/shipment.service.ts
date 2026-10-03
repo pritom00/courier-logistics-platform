@@ -198,7 +198,13 @@ export async function getMyAssignedShipments(courierId: string, req: Request) {
   const { page, limit, skip } = getPagination(req);
   const where = { courierId, deletedAt: null };
   const [items, total] = await Promise.all([
-    prisma.shipment.findMany({ where, skip, take: limit, orderBy: { createdAt: "desc" } }),
+    prisma.shipment.findMany({
+      where,
+      skip,
+      take: limit,
+      orderBy: { createdAt: "desc" },
+      include: { customer: { select: { id: true, name: true } } },
+    }),
     prisma.shipment.count({ where }),
   ]);
   return { items, meta: buildMeta(total, page, limit) };
